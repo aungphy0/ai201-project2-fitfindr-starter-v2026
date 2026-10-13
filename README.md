@@ -39,44 +39,79 @@
 
 ## What This Does
 
-<!-- Three or four sentences: what a user asks for, and what they get back. -->
-
-
+FitFindr helps someone shop secondhand. You type what you're looking for in
+plain language — like `'vintage graphic tee under $30, size M'` — and it
+searches 40 thrift listings from Depop, thredUp and Poshmark for the best
+match within your size and budget. It then suggests one or two outfits that
+pair the find with clothes you already own, and writes a short caption you
+could post about it. If nothing matches, it stops and tells you what to change
+(a higher price, a different size, other keywords) instead of inventing a
+result.
 
 ---
 
 ## Tool Inventory
 
-<!-- Four lines per tool. This is worth 2 points and it's the single most
-     common place students lose them.
-
-     "Returns a list" earns NOTHING. The description has to say what is IN
-     the list.
-
-     The empty case isn't optional either — it's the thing your loop branches
-     on, and if you don't decide it here you'll discover it as a crash in
-     Milestone 5. -->
-
 ### `search_listings`
 
-- **What it does:**
-- **Inputs:** <!-- name and type each: `max_price` (float), not "a price" -->
-- **Returns:**
-- **When it has nothing:**
+- **What it does:** Filters the 40 listings by price ceiling and size, scores
+  each remaining listing by how many of the query's keywords appear in its
+  title, description, category, style tags and colors, and returns them best
+  match first. It does not call the model.
+- **Inputs:**
+  - `description` (str) — keywords from the query, e.g. `"vintage graphic tee"`.
+    Matching is case-insensitive and on whole words, ignoring filler words
+    like "a", "the", "for", "looking".
+  - `size` (str or None) — e.g. `"M"`. `None` skips the size filter. A listing
+    matches when every word of the requested size is one of the words in the
+    listing's size, after splitting on `/`, spaces and brackets — so `"M"`
+    matches `"M"`, `"S/M"` and `"M/L"`, but `"S"` does **not** match `"US 9"`
+    and `"L"` does **not** match `"XL"`. Listings sized "One Size" match any
+    size.
+  - `max_price` (float or None) — inclusive ceiling, e.g. `30.0` keeps a $30.00
+    item. `None` skips the price filter.
+- **Returns:** a list of up to 10 (`config.SEARCH_RESULT_LIMIT`) listing
+  dicts, highest keyword score first. Each dict is a full listing: `id` (str),
+  `title` (str), `description` (str), `category` (str), `style_tags`
+  (list of str), `size` (str), `condition` (str), `price` (float), `colors`
+  (list of str), `brand` (str **or None** — None on 32 of 40 listings) and
+  `platform` (str).
+- **When it has nothing:** returns an empty list `[]` — never `None`, never an
+  exception. That happens when no listing passes the price and size filters,
+  or when none of the survivors share a single keyword with the description.
+  The loop checks for `[]` and stops.
 
 ### `suggest_outfit`
 
-- **What it does:**
+- **What it does:** Asks the model for one or two outfits built around the
+  thrifted item, using pieces from the user's wardrobe by name.
 - **Inputs:**
-- **Returns:**
-- **When it has nothing:**
+  - `new_item` (dict) — one listing dict from `search_listings` (the
+    `selected_item`).
+  - `wardrobe` (dict) — `{"items": [...]}`, where each item has `id`, `name`,
+    `category`, `colors` (list), `style_tags` (list) and an optional `notes`.
+    The list may be empty.
+- **Returns:** a non-empty string with one or two outfit suggestions. With a
+  wardrobe, each outfit names at least one piece from the wardrobe by its
+  `name` (e.g. "Baggy straight-leg jeans, dark wash").
+- **When it has nothing:** if `wardrobe["items"]` is empty, it asks the model
+  for general styling ideas for the item instead (what kinds of pieces and
+  colors go with it) and returns those — still a non-empty string, never `""`
+  and never an exception.
 
 ### `create_fit_card`
 
-- **What it does:**
+- **What it does:** Asks the model for a short, casual caption someone would
+  post about the find.
 - **Inputs:**
-- **Returns:**
-- **When it has nothing:**
+  - `outfit` (str) — the string returned by `suggest_outfit`.
+  - `new_item` (dict) — the same listing dict that went into `suggest_outfit`.
+- **Returns:** a 2–4 sentence caption (str) that mentions the item, its price
+  (e.g. `$24`) and its platform once each, and describes the vibe of the
+  outfit. The brand is mentioned only when `brand` is not `None`.
+- **When it has nothing:** if `outfit` is empty or only whitespace, it does not
+  call the model and returns the message `"No outfit to caption — run
+  suggest_outfit first."` instead of raising.
 
 ---
 
