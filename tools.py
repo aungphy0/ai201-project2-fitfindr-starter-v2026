@@ -61,24 +61,47 @@ def _size_matches(requested: str, listing_size: str) -> bool:
     listing = (listing_size or "").lower()
     if listing.startswith("one size"):
         return True
-    wanted = set(_words(requested))
-    have = set(_words(listing))
+    # Keep decimals together so "US 8" doesn't match "US 8.5".
+    def size_words(text):
+        return set(re.findall(r"[a-z0-9]+(?:\.[0-9]+)?", text.lower()))
+
+    wanted = size_words(requested or "")
+    have = size_words(listing)
     return bool(wanted) and wanted <= have
 
 
 def _score(listing: dict, keywords: set[str]) -> int:
-    """How many query keywords appear as whole words anywhere in the listing."""
-    text = " ".join([
-        listing.get("title", ""),
-        listing.get("description", ""),
-        listing.get("category", ""),
-        " ".join(listing.get("style_tags", [])),
-        " ".join(listing.get("colors", [])),
-    ])
-    words = set(_words(text))
-    # Count "tee" in the query as a match for "tees" in the listing, and the reverse.
-    words |= {w[:-1] for w in words if w.endswith("s")}
-    return sum(1 for k in keywords if k in words or k.rstrip("s") in words)
+    """
+    Weighted keyword overlap. Each query keyword scores once, by the best place
+    it appears:
+
+        3  in the title
+        2  in the style tags or category
+        1  only in the description or colors
+
+    Weighting matters: the mesh top's description says "great for layering
+    under a graphic tee", which matched "graphic tee" as strongly as the
+    actual graphic tees until title and tag matches counted for more.
+    """
+    def word_set(text: str) -> set[str]:
+        words = set(_words(text))
+        # Count "tee" in the query as a match for "tees" in the listing.
+        return words | {w[:-1] for w in words if w.endswith("s")}
+
+    title = word_set(listing.get("title", ""))
+    tags = word_set(" ".join(listing.get("style_tags", [])) + " " + listing.get("category", ""))
+    rest = word_set(listing.get("description", "") + " " + " ".join(listing.get("colors", [])))
+
+    score = 0
+    for k in keywords:
+        forms = {k, k.rstrip("s")}
+        if forms & title:
+            score += 3
+        elif forms & tags:
+            score += 2
+        elif forms & rest:
+            score += 1
+    return score
 
 
 

@@ -55,9 +55,10 @@ result.
 ### `search_listings`
 
 - **What it does:** Filters the 40 listings by price ceiling and size, scores
-  each remaining listing by how many of the query's keywords appear in its
-  title, description, category, style tags and colors, and returns them best
-  match first. It does not call the model.
+  each remaining listing by keyword overlap with the query, and returns them
+  best match first. Each keyword scores by the best place it appears: 3 in the
+  title, 2 in the style tags or category, 1 only in the description or colors
+  (ties go to the cheaper item). It does not call the model.
 - **Inputs:**
   - `description` (str) — keywords from the query, e.g. `"vintage graphic tee"`.
     Matching is case-insensitive and on whole words, ignoring filler words
@@ -66,8 +67,8 @@ result.
     matches when every word of the requested size is one of the words in the
     listing's size, after splitting on `/`, spaces and brackets — so `"M"`
     matches `"M"`, `"S/M"` and `"M/L"`, but `"S"` does **not** match `"US 9"`
-    and `"L"` does **not** match `"XL"`. Listings sized "One Size" match any
-    size.
+    and `"L"` does **not** match `"XL"`. Decimals stay together, so `"US 8"`
+    does not match `"US 8.5"`. Listings sized "One Size" match any size.
   - `max_price` (float or None) — inclusive ceiling, e.g. `30.0` keeps a $30.00
     item. `None` skips the price filter.
 - **Returns:** a list of up to 10 (`config.SEARCH_RESULT_LIMIT`) listing
@@ -117,38 +118,64 @@ result.
 
 ## Planning Loop
 
-<!-- Your branch rule, stated as a rule — the condition AND both paths — plus
-     the file and function that holds it.
-
-     Like this:
-       "If search_listings returns an empty list, put a message in the session
-        and stop. Otherwise take the first result and go to suggest_outfit."
-        — agent.py::run_agent
-
-     The grader checks your code against what you claim here, so the file and
-     function have to be real. -->
-
-**Branch rule:**
+**Branch rule:** If `search_listings` returns an empty list, put a message in
+`session["error"]` that names what the user searched for and what to change
+(raise the price limit, try a different size or drop it, use broader
+keywords), and stop — `suggest_outfit` and `create_fit_card` are never
+called. Otherwise take the first (best-scoring) result as
+`session["selected_item"]` and go on to `suggest_outfit`, then
+`create_fit_card`.
 
 **Where it lives:** `agent.py::run_agent`
 
-**How the query is parsed:** <!-- regex, string splitting, or asking the model — say which -->
+The loop is a `while True` that looks at what the session already holds and
+picks the next step: parse → search → outfit → fit card. Every pass calls
+`trace.check_iterations()`, so a step that never fills in its field can't loop
+forever (it stops at `config.MAX_ITERATIONS`).
 
-**What moves through the session:** <!-- which fields, in what order -->
+**How the query is parsed:** regex, in `agent.py::parse_query`. It pulls out a
+price ceiling ("under $30", "below 60", "less than $30", "up to $30",
+"$40 max"), a size ("size M", "size S/M", "size US 8.5", "size W30 L30", or
+"in a medium" → M), and whatever is left becomes the description. Example:
+`'vintage graphic tee under $30, size M'` →
+`{"description": "vintage graphic tee", "size": "M", "max_price": 30.0}`.
+
+**What moves through the session:** in this order —
+
+1. `query` — what the user typed
+2. `parsed` — `description`, `size`, `max_price` from `parse_query`
+3. `search_results` — the list from `search_listings` (the branch checks this)
+4. `selected_item` — `search_results[0]`
+5. `outfit_input_id` — the `id` of the item handed to `suggest_outfit`
+6. `outfit_suggestion` — what `suggest_outfit` returned
+7. `card_input_id` — the `id` of the item handed to `create_fit_card`
+8. `fit_card` — what `create_fit_card` returned
+9. `error` — set only when the run stopped early; then 4–8 stay `None`
+
+Both tools read the item from `session["selected_item"]`, not from a local
+variable, and record its `id` as they receive it. Fields 5 and 7 exist for
+criterion 3: on a correct run both equal `selected_item["id"]`.
 
 ---
 
 ## Sample Run
 
-<!-- Two things go here.
-
-     1. One FULL query and its output, pasted as text.
-     2. Your three per-tool terminal tests — the command and what it printed. -->
-
 **One full query**
 
 ```
-$ python app.py ask '...'
+$ python app.py ask 'vintage graphic tee under $30, size M'
+
+  Found:    Y2K Baby Tee — Butterfly Print — $18.0 on depop
+
+  Outfit:   Outfit 1:
+Pair the Y2K Baby Tee with the baggy straight-leg jeans, black combat boots, and the black cropped zip hoodie for a cool, balanced contrast between fitted and loose. 
+
+Outfit 2:
+Style the Y2K Baby Tee with the wide-leg khaki trousers, chunky white sneakers, and the vintage black denim jacket to lean into that effortless, retro street style.
+
+  Fit card: Just scored the cutest Y2K Baby Tee with a butterfly print for only $18 and I am obsessed. I'm listing it on depop, but first I had to style it two ways to show you the vision. You can wear it fitted with baggy jeans and combat boots for a cool contrast, or lean into retro street style with wide-leg trousers and sneakers.
+
+2 model calls this session, 465 prompt + 160 output tokens
 
 ```
 
@@ -156,16 +183,35 @@ $ python app.py ask '...'
 
 ```
 $ python -c "from tools import search_listings; print(search_listings('graphic tee', max_price=30))"
+[{'id': 'lst_006', 'title': 'Graphic Tee — 2003 Tour Bootleg Style', 'description': 'Vintage-style bootleg tee with faded graphic. Slightly boxy fit. 100% cotton, soft and worn-in.', 'category': 'tops', 'style_tags': ['graphic tee', 'vintage', 'grunge', 'streetwear', 'band tee'], 'size': 'L', 'condition': 'good', 'price': 24.0, 'colors': ['black'], 'brand': None, 'platform': 'depop'}, {'id': 'lst_002', 'title': 'Y2K Baby Tee — Butterfly Print', 'description': 'Super cute early 2000s baby tee with butterfly graphic. Fitted crop length. Tag says medium but fits like a small.', 'category': 'tops', 'style_tags': ['y2k', 'vintage', 'graphic tee', 'cottagecore'], 'size': 'S/M', 'condition': 'excellent', 'price': 18.0, 'colors': ['white', 'pink', 'purple'], 'brand': None, 'platform': 'depop'}, {'id': 'lst_033', 'title': 'Vintage Band Tee — Faded Grey', 'description': 'Faded grey band-style tee with distressed graphic. Crew neck. Fits boxy. Well-loved but no holes or major damage.', 'category': 'tops', 'style_tags': ['vintage', 'grunge', 'band tee', 'graphic tee', 'streetwear'], 'size': 'L', 'condition': 'fair', 'price': 19.0, 'colors': ['grey', 'charcoal'], 'brand': None, 'platform': 'depop'}, {'id': 'lst_015', 'title': 'Vintage Graphic Hoodie — Faded Black', 'description': 'Faded black pullover hoodie with barely-visible vintage graphic on the chest. Cozy interior. Some pilling but adds to the worn-in look.', 'category': 'tops', 'style_tags': ['vintage', 'grunge', 'graphic', 'streetwear'], 'size': 'L', 'condition': 'fair', 'price': 26.0, 'colors': ['black', 'charcoal'], 'brand': None, 'platform': 'depop'}, {'id': 'lst_017', 'title': 'Mesh Long-Sleeve Top — Black', 'description': 'Sheer black mesh long-sleeve. Great for layering under a graphic tee or over a bralette. Stretchy material, fits true to size.', 'category': 'tops', 'style_tags': ['y2k', 'grunge', 'goth', 'layering'], 'size': 'S/M', 'condition': 'excellent', 'price': 15.0, 'colors': ['black'], 'brand': None, 'platform': 'depop'}, {'id': 'lst_012', 'title': 'Oversized Crewneck Sweatshirt — Vintage Navy', 'description': 'Perfectly faded navy crewneck. Genuinely vintage — not manufactured distressed. Ribbed cuffs and hem. No graphics, clean.', 'category': 'tops', 'style_tags': ['vintage', 'basics', 'oversized', 'classic'], 'size': 'XL (fits oversized)', 'condition': 'good', 'price': 20.0, 'colors': ['navy'], 'brand': None, 'platform': 'thredUp'}, {'id': 'lst_011', 'title': 'Low-Rise Cargo Pants — Khaki', 'description': 'Y2K era low-rise cargo pants. Lots of pockets. Khaki color, slightly distressed at the hems. Great for layering with a long tee.', 'category': 'bottoms', 'style_tags': ['y2k', 'cargo', '2000s', 'streetwear'], 'size': 'W29', 'condition': 'fair', 'price': 27.0, 'colors': ['khaki', 'tan'], 'brand': None, 'platform': 'poshmark'}]
+```
+
+```
+$ python -c "from tools import suggest_outfit; from utils.data_loader import get_example_wardrobe, load_listings; print(suggest_outfit(load_listings()[0], get_example_wardrobe()))"
+
+Outfit 1:
+White ribbed tank top tucked into the Vintage Levi's 501 Jeans — Medium Wash, layered with the Vintage black denim jacket, finished with Chunky white sneakers and the Black crossbody bag. 
+
+Outfit 2:
+Oversized grey crewneck sweatshirt worn over the Vintage Levi's 501 Jeans — Medium Wash, cinched with the Brown leather belt, and paired with Black combat boots and the Black crossbody bag.
 
 ```
 
 ```
-$ python -c "from tools import suggest_outfit; ..."
+$ python -c "from tools import create_fit_card; from utils.data_loader import load_listings; print(create_fit_card('jeans and white sneakers', load_listings()[0]))"
+
+Just scored these classic vintage Levi's 501 jeans on depop for only $38 and I am completely obsessed with the medium wash. I am keeping the rest of the outfit super effortless by pairing them with fresh white sneakers for that ultimate casual 90s off-duty vibe. Honestly, nothing beats finding a perfectly broken-in pair of denim that fits like a glove on the first try.
 
 ```
 
+**The empty path** — the same loop on a query nothing matches:
+
 ```
-$ python -c "from tools import create_fit_card; ..."
+$ python app.py ask 'designer ballgown size XXS under $5'
+
+ No listings matched "designer ballgown", under $5, size XXS. To find something, raise your price limit, or try a different size or leave the size out, or use broader keywords (e.g. 'tee' instead of 'ballgown').
+
+0 model calls this session
 
 ```
 
