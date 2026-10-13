@@ -44,59 +44,50 @@ Given a query that matches no listings, the agent stops before calling
 
 ## 3. Something about state
 
-<!-- YOU WRITE THIS ONE.
-
-     How would you know that the item your search found is the same item the
-     next tool received? Name something countable or observable.
-
-     This is the criterion people find hardest, because state failure doesn't
-     look like state failure — it looks like a tool problem. Something that
-     compares session["selected_item"] against what actually reached
-     suggest_outfit is the shape you're after. -->
-
-
+Given a query that matches at least one listing, the `id` of
+`session["selected_item"]` is the same `id` as the item that `suggest_outfit`
+received and the item that `create_fit_card` received — in 5 of 5 tries.
 
 **Why this target:**
-
-
+The handoff from search to the next two tools is plain code with no model in
+it, so it should behave identically every run; one miss means a bug, not bad
+luck. I'm checking `id` rather than reading the outfit, because a wrong-item
+bug (e.g. passing `results[1]` or a stale variable) still produces a
+believable outfit — it just describes a different listing. Only comparing the
+ids catches that.
 
 ---
 
 ## 4. Something about the fit card
 
-<!-- YOU WRITE THIS ONE.
-
-     The fit card calls a model, so the same input can produce different words
-     each time. That's not a bug — it's the nature of the tool. So what would
-     make it acceptable?
-
-     Think about what you'd actually be unhappy to see. A caption that never
-     mentions the price? Two different items producing the same opening
-     sentence? A card longer than a caption anyone would post? Any of those can
-     be turned into a number. -->
-
-
+Given a query that matches, the fit card states the selected item's price
+(e.g. `$24`) and its platform (`depop`, `thredUp` or `poshmark`), and is no
+longer than 4 sentences — in at least 4 of 5 tries.
 
 **Why this target:**
-
-
+Price and platform are what make the caption useful — they tell a reader what
+it costs and where to buy it. The card is written by the model at temperature
+0.9 with caching off during the eval, so the wording changes every run and it
+will sometimes drop a detail or run long; 5 of 5 would be asking the model to
+be deterministic. I didn't require the brand, because 32 of the 40 listings
+have no brand, so a brand rule would fail for reasons that have nothing to do
+with the caption.
 
 ---
 
-## 5. Your choice
+## 5. Your choice — the price ceiling is respected
 
-<!-- YOU WRITE THIS ONE TOO.
-
-     Pick something you actually care about getting right. Speed, the empty
-     wardrobe path, what happens when the model can't be reached, whether the
-     search respects a price ceiling — anything, as long as it names a number
-     or an observable outcome. -->
-
-
+Given a query that includes a price ceiling ("under $X"), every listing in
+`session["search_results"]` has `price` less than or equal to X — in 5 of 5
+tries, using five different ceilings ($15, $20, $25, $30, $40).
 
 **Why this target:**
-
-
+A price ceiling is a hard limit for the user: showing a $38 item to someone
+who said "under $30" is a wrong answer, not a weaker one. Both steps involved —
+pulling X out of the query and filtering on it in `search_listings` — are code,
+so 5 of 5 is achievable. The five ceilings span the data's price range ($12 to
+$75), so a low ceiling like $15 checks that the filter works when only a few
+listings qualify, not just when almost everything does.
 
 ---
 
