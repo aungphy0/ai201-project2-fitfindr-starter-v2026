@@ -69,20 +69,20 @@ mcp = FastMCP("fitfindr", log_level="WARNING")
 
 # ── TODO: uncomment and fill this in ──────────────────────────────────────────
 #
-# @mcp.tool()
-# def search_listings(
-#     description: str,
-#     size: str | None = None,
-#     max_price: float | None = None,
-# ) -> list[dict]:
-#     """
-#     <-- YOUR DESCRIPTION GOES HERE.
-#
-#         One or two sentences. What does this tool do, what does it need, and
-#         what does it give back when it finds nothing? Written for a reader
-#         who cannot see the code.
-#     """
-#     return _search_listings_impl(description, size, max_price)
+@mcp.tool()
+def search_listings(
+     description: str,
+     size: str | None = None,
+     max_price: float | None = None,
+ ) -> list[dict]:
+     """
+    
+         Filtering the 40 thrift listings by size and price, then ranked them by keyword match. It have 
+         three arguments: description, size, and max_price. The description is string which contains the search keyword, 
+         size is S/M/L and max_price are floats USD. If no listings match the criteria, it returns an empty list.
+         
+     """
+     return _search_listings_impl(description, size, max_price)
 #
 # ──────────────────────────────────────────────────────────────────────────────
 #
