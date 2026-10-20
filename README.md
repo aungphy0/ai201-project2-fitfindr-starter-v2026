@@ -445,24 +445,66 @@ speed: each search now starts a new server process, so it's slower.
 
      `python run_eval.py --label after` -->
 
-**What I changed:**
+**What I changed:** One thing: the prompt in `tools.py::create_fit_card`.
+Nothing in the tools' logic, the loop, the session or `scenarios.py` changed.
+The original lines are commented out above the new ones.
 
-**Which failure it was meant to fix:**
+1. The opening line now says who is buying: *"I just BOUGHT this item
+   secondhand on {platform}; I am the buyer showing off what I found, not
+   someone selling it."* The labels `Price:` and `Platform:` became
+   `Price I paid:` and `Bought on:`.
+2. I added one rule: *"Write as the buyer. Never say I listed, uploaded,
+   posted or am selling it, and never tell readers to buy or grab it."*
+
+**Which failure it was meant to fix:** Diagnosis 1, the fit cards written as
+if the user were the seller (11 of 45 before, 10 of 20 on Depop items). The
+diagnosis put the cause in the prompt: it named the platform but never said
+the user bought the item there. So the fix was to add that missing fact to
+the prompt.
 
 ### Run Log — After
 
+Source: `results/run_2026-10-19_2223_after.md` (`python run_eval.py --label after`).
+It used the same 10 scenarios, 5 tries each, caching off and temperature 0.9.
+Criterion 5's row is scored the same way as before (one ceiling per column),
+and again all 25 tries passed.
+
 | Criterion | Target | Try 1 | Try 2 | Try 3 | Try 4 | Try 5 | Verdict |
 |---|---|---|---|---|---|---|---|
-| 1.  |  |  |  |  |  |  |  |
-| 2.  |  |  |  |  |  |  |  |
-| 3.  |  |  |  |  |  |  |  |
-| 4.  |  |  |  |  |  |  |  |
-| 5.  |  |  |  |  |  |  |  |
+| 1. Matching query completes all three tools | 4 of 5 | PASS | PASS | PASS | PASS | PASS | MET (5/5) |
+| 2. Impossible query stops before the second tool | 5 of 5 | PASS | PASS | PASS | PASS | PASS | MET (5/5) |
+| 3. Same `id` through selected_item → suggest_outfit → create_fit_card | 5 of 5 | PASS | PASS | PASS | PASS | PASS | MET (5/5) |
+| 4. Fit card states price + platform, ≤ 4 sentences | 4 of 5 | PASS | PASS | PASS | PASS | PASS | MET (5/5) |
+| 5. Price ceiling respected ($15 / $20 / $25 / $30 / $40) | 5 of 5 | PASS | PASS | PASS | PASS | PASS | MET (5/5) |
 
-**Did it help, and how do I know:**
+**Did it help, and how do I know:** Yes, for the failure it targeted. I
+counted seller-voice cards the same way in both run logs: every completed fit
+card (45 per run) checked for the same phrases ("listed it", "uploaded it",
+"my depop", "up now on", "now live on", "grab it", "snag them", "head over
+to", "keep it for myself", "before I change my mind", "selling", "for sale").
 
-<!-- If it made things worse, say that. Honestly reported, that earns full
-     credit and is more interesting than one that worked. -->
+| | Before | After |
+|---|---|---|
+| Seller-voice cards, all items | 11 of 45 | **0 of 45** |
+| Depop items only | 10 of 20 | **0 of 20** |
+| poshmark / thredUp items | 1 of 25 | 0 of 25 |
+
+The worst scenario before was "price ceiling $30" (the band tee on Depop),
+with 5 of 5 cards in seller voice. After the change it had 0 of 5. Every card
+there now reads like *"Scored this faded grey vintage band tee on depop for
+only $19 and I am completely obsessed with it."* I also read all 20 Depop
+cards by hand to catch seller phrasing the keyword list might miss. I didn't
+find any.
+
+The five criteria didn't change. They were 5/5 before and are 5/5 after. Every
+card still has the right price and platform in 2–4 sentences, so the new rule
+didn't push anything out.
+
+There is one side effect. The cards became more alike: 37 of 45 now open with
+"Score/Scored" (30 before), and 43 of 45 put the platform in the first
+sentence (34 before). The "Bought on" framing seems to steer the model toward
+one opening, "Scored X on {platform} for {price}." No criterion checks
+variety, so this doesn't count as a miss, but it is a real cost of the fix.
 
 
 
@@ -474,37 +516,73 @@ speed: each search now starts a new server process, so it's slower.
      you did. "I ran out of time" is fine if it's true. Pretending nothing is
      left is not. -->
 
+No criterion is missed, before or after. These are the problems I know are
+still there:
+
+1. **Search accepts a match on a single common keyword** (`tools.py::search_listings`).
+   "vintage jacket under $25" returns a polo shirt, and "vintage tee under $15"
+   returns a leather belt, because "vintage" alone is enough to score. Criterion
+   1 passes, but the item isn't always what was asked for. *What I'd do:*
+   require the item-type word (tee, jacket, jeans…) to match the title or
+   category, or give "vintage" less weight. I'd then add a criterion such as
+   "the selected item's category matches the noun in the query". *Why I stopped:*
+   Milestone 5 allows one change, and this one changes search ranking, which
+   would affect criteria 1, 3 and 5 all at once.
+
+2. **The criterion 3 check can't fail as written.** The trace note compares
+   `item["id"]` with `session["selected_item"]["id"]`, which is the same
+   object. *What I'd do:* compare `outfit_input_id` and `card_input_id`
+   against `search_results[0]["id"]` instead, so that passing the wrong item
+   would actually show up. It matched on every try in both runs, but the
+   evidence should be able to show a failure if one happened.
+
+3. **Fit cards are more formulaic after the fix.** 37 of 45 open with
+   "Score/Scored". *What I'd do:* add a rule to vary the opening, then re-run
+   and check that the seller-voice count stays at 0. *Why I stopped:* that
+   would be a second change, and it would make it unclear which change caused
+   the result.
+
+4. **The seller-voice measurement is a keyword list plus a read-through, not a
+   criterion.** Criterion 4 doesn't check voice, which is why it passed while
+   11 cards were wrong. *What I'd do:* add a revision under criterion 4 in
+   `criteria.md` (keeping the original line) that says "written as the buyer",
+   so the next run scores voice directly.
+
+5. **Criterion 1 is tested with only one query.** Five tries of the same query
+   mostly test the model, not the search. *What I'd do:* use five different
+   matching queries, as criterion 5 does with its ceilings.
+
 
 
 <!-- ═════════════════════════════════════════════════════════════════════
 
      SUBMISSION CHECKLIST — unit 3
 
-       [ ] criteria.md has five numbered criteria, each with a target
-       [ ] Each criterion has a reason underneath it
-       [ ] All five unit 3 sections above have real content
-       [ ] Tool Inventory: all three tools, inputs WITH TYPES, a specific
+       [x] criteria.md has five numbered criteria, each with a target
+       [x] Each criterion has a reason underneath it
+       [x] All five unit 3 sections above have real content
+       [x] Tool Inventory: all three tools, inputs WITH TYPES, a specific
            return value, and the empty case
-       [ ] Planning Loop names the branch rule and agent.py::run_agent
-       [ ] Sample Run: one full query plus the three per-tool tests, as text
-       [ ] At least four new commits
-       [ ] Repository URL submitted — WRITE IT DOWN, you submit the same one
+       [x] Planning Loop names the branch rule and agent.py::run_agent
+       [x] Sample Run: one full query plus the three per-tool tests, as text
+       [x] At least four new commits
+       [x] Repository URL submitted — WRITE IT DOWN, you submit the same one
            next unit
 
      SUBMISSION CHECKLIST — unit 4
 
-       [ ] mcp_server.py exists with one tool registered
+       [x] mcp_server.py exists with one tool registered
            (or a written record of exactly where the rewire broke)
-       [ ] Run Log — Before, five criteria, five tries each
-       [ ] Real output pasted underneath, naming file and function
-       [ ] A verdict on every criterion
-       [ ] A diagnosis for every miss, naming a place AND a mechanism
-       [ ] Loop Trace, with the MCP call visible in it
-       [ ] All three failure modes triggered and handled
-       [ ] One improvement, with Run Log — After in the same format
-       [ ] What's Still Broken
-       [ ] At least four new commits
-       [ ] The SAME repository URL as last unit
+       [x] Run Log — Before, five criteria, five tries each
+       [x] Real output pasted underneath, naming file and function
+       [x] A verdict on every criterion
+       [x] A diagnosis for every miss, naming a place AND a mechanism
+       [x] Loop Trace, with the MCP call visible in it
+       [x] All three failure modes triggered and handled
+       [x] One improvement, with Run Log — After in the same format
+       [x] What's Still Broken
+       [x] At least four new commits
+       [x] The SAME repository URL as last unit
 
      Do not delete and recreate this repository. Your commit history is what
      shows your criteria existed before your results did.
