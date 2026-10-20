@@ -296,18 +296,36 @@ def create_fit_card(outfit: str, new_item: dict) -> str:
     brand_line = f"Brand: {brand}\n" if brand else ""
 
     prompt = (
-        "Write a caption for a social media post about a thrift find.\n\n"
+        # "Write a caption for a social media post about a thrift find.\n\n"
+        # f"Item: {new_item.get('title')}\n"
+        # f"{brand_line}"
+        # f"Price: {price}\n"
+        # f"Platform: {platform}\n"
+        ### changed ###
+        "Write a caption for a social media post about a thrift find. "
+        f"I just BOUGHT this item secondhand on {platform}; I am the buyer "
+        "showing off what I found, not someone selling it.\n\n"
         f"Item: {new_item.get('title')}\n"
         f"{brand_line}"
-        f"Price: {price}\n"
-        f"Platform: {platform}\n"
+        f"Price I paid: {price}\n"
+        f"Bought on: {platform}\n"
+        ### changed ###
         f"How I'm styling it: {outfit.strip()}\n\n"
         "Rules:\n"
+        # "- 2 to 4 sentences, casual, first person, like a real post.\n"
+        # f"- Mention the item, the price written exactly as {price}, and the "
+        # f"platform written exactly as {platform} — once each.\n"
+        # "- Be specific about the vibe of the outfit.\n"
+        # "- No hashtag lists, no quotation marks around the caption."
+        ### changed ###
         "- 2 to 4 sentences, casual, first person, like a real post.\n"
         f"- Mention the item, the price written exactly as {price}, and the "
         f"platform written exactly as {platform} — once each.\n"
         "- Be specific about the vibe of the outfit.\n"
+        "- Write as the buyer. Never say I listed, uploaded, posted or am "
+        "selling it, and never tell readers to buy or grab it.\n"
         "- No hashtag lists, no quotation marks around the caption."
+        ### changed ###
     )
 
     return (generate(prompt) or "").strip()
