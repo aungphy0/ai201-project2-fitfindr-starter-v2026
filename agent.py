@@ -213,8 +213,13 @@ def run_agent(query: str, wardrobe: dict) -> dict:
                 "max_price": parsed["max_price"],
                 }
             )
+            # trace.step("search_listings (via MCP)", inputs=parsed,
+            #            returned=session["search_results"])
+            prices = [r["price"] for r in session["search_results"]]
+            highest = f"${max(prices)}" if prices else "none (empty)"
             trace.step("search_listings (via MCP)", inputs=parsed,
-                       returned=session["search_results"])
+                       returned=session["search_results"],
+                       note=f"ceiling {parsed['max_price']} · highest price returned {highest}")
 
             # ⚠️ THE BRANCH: nothing came back -> explain what to change and
             # stop. suggest_outfit and create_fit_card are never called.
@@ -239,7 +244,8 @@ def run_agent(query: str, wardrobe: dict) -> dict:
                                     f"model, so no outfit or fit card this time. ({exc})")
                 trace.step("suggest_outfit", inputs=item, note="model unavailable -> stopping")
                 return session
-            trace.step("suggest_outfit", inputs=item, returned=session["outfit_suggestion"])
+            trace.step("suggest_outfit", inputs=item, returned=session["outfit_suggestion"],
+                       note=f"received id {item['id']} · selected_item id {session['selected_item']['id']}")
             continue
 
         # Step 4 — fit card, from the outfit and the same item in the session.
@@ -253,7 +259,8 @@ def run_agent(query: str, wardrobe: dict) -> dict:
                                     f"model, so no fit card this time. ({exc})")
                 trace.step("create_fit_card", inputs=item, note="model unavailable -> stopping")
                 return session
-            trace.step("create_fit_card", inputs=item, returned=session["fit_card"])
+            trace.step("create_fit_card", inputs=item, returned=session["fit_card"],
+                       note=f"received id {item['id']} · selected_item id {session['selected_item']['id']}")
             continue
 
         # Everything is filled in.
