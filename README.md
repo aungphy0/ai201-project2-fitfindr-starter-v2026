@@ -258,17 +258,44 @@ $ python app.py ask 'designer ballgown size XXS under $5'
 
 | Criterion | Target | Try 1 | Try 2 | Try 3 | Try 4 | Try 5 | Verdict |
 |---|---|---|---|---|---|---|---|
-| 1.  |  |  |  |  |  |  |  |
-| 2.  |  |  |  |  |  |  |  |
-| 3.  |  |  |  |  |  |  |  |
-| 4.  |  |  |  |  |  |  |  |
-| 5.  |  |  |  |  |  |  |  |
+| 1. Matching query completes all three tools | 4 of 5 | PASS | PASS | PASS | PASS | PASS | MET (5/5) |
+| 2. Impossible query stops before the second tool | 5 of 5 | PASS | PASS | PASS | PASS | PASS | MET (5/5) |
+| 3. Same `id` through selected_item → suggest_outfit → create_fit_card | 5 of 5 | PASS | PASS | PASS | PASS | PASS | MET (5/5) |
+| 4. Fit card states price + platform, ≤ 4 sentences | 4 of 5 | PASS | PASS | PASS | PASS | PASS | MET (5/5) |
+| 5. Price ceiling respected ($15 / $20 / $25 / $30 / $40) | 5 of 5 | PASS | PASS | PASS | PASS | PASS | MET (5/5) |
 
-**Real output from one try**, pasted as text, naming the file and function
-that produced it:
+Source: `results/run_2026-10-19_1743_before.md` (`python run_eval.py --label before`,
+5 tries per scenario, caching off, temperature 0.9).
+
+- **Criterion 5:** `run_eval.py` writes one row per scenario, and criterion 5
+  has five scenarios, one per ceiling. Try 1–5 in the row above are the five
+  ceilings in order ($15, $20, $25, $30, $40), each from its own try 1. All 25
+  tries passed, not just those five. Search doesn't call the model, so every
+  try at a given ceiling returned the same list.
+- **The empty-wardrobe scenario** (`denim jacket under $50`, empty wardrobe) is
+  a diagnostic run and isn't counted here. All 5 tries completed, and the
+  outfit gave general styling advice instead of naming wardrobe pieces.
+
+**Real output from one try** — criterion 1, try 1. Produced by
+`run_eval.py::main` → `agent.py::run_agent`, with the search going through
+`mcp_client.call_tool` → `mcp_server.py::search_listings`. The two model steps
+are `tools.py::suggest_outfit` and `tools.py::create_fit_card`:
 
 ```
+- Query: vintage graphic tee under $30
+- stopped early: no
+- selected_item: Vintage Band Tee — Faded Grey ($19.0, depop)
+- search_results: 10
 
+Outfit suggestion:
+Outfit one:
+Vintage Band Tee layered under the Black cropped zip hoodie, paired with the Baggy straight-leg jeans, dark wash. Finish with the Chunky white sneakers and the Black crossbody bag.
+
+Outfit two:
+Vintage Band Tee tucked into the Wide-leg khaki trousers, worn with the Brown leather belt. Add the Vintage black denim jacket and the Black combat boots for a grunge look.
+
+Fit card:
+Scored this faded grey vintage band tee for just $19 and I am already obsessed with how versatile it is. I listed it on depop, but honestly, styling it two completely different ways makes me want to keep it forever. You can go the effortless streetwear route with a cropped zip hoodie and chunky sneakers, or lean into a grungier aesthetic by tucking it into wide-leg khaki trousers with combat boots.
 ```
 
 ---
@@ -293,14 +320,53 @@ that produced it:
 
 | # | Criterion | Target | Verdict | How I decided |
 |---|---|---|---|---|
-| 1 |  |  |  |  |
-| 2 |  |  |  |  |
-| 3 |  |  |  |  |
-| 4 |  |  |  |  |
-| 5 |  |  |  |  |
+| 1 | Matching query completes all three tools | 4 of 5 | MET (5/5) | Every try had `stopped early: no` and a non-empty fit card, and its trace shows all five steps through `create_fit_card` |
+| 2 | Impossible query stops before the second tool | 5 of 5 | MET (5/5) | Every trace ends at `[3] branch` with no `suggest_outfit` step, and the message names what to change (price, size, keywords) |
+| 3 | Same `id` through all three tools | 5 of 5 | MET (5/5) | Both trace notes read `received id lst_002 · selected_item id lst_002` on every try |
+| 4 | Fit card has price + platform, ≤ 4 sentences | 4 of 5 | MET (5/5) | All 5 cards contain `$42` and `poshmark`, and each is 3 sentences (counted on `.`, `!`, `?`) |
+| 5 | Price ceiling respected | 5 of 5 | MET (5/5) | The search note's "highest price returned" was ≤ the ceiling every time: $15/$15, $20/$20, $25/$25, $26/$30, $40/$40 |
 
 **Diagnoses**
 
+No criterion missed, so there is no miss to diagnose. Reading all 45
+completed fit cards turned up a failure my criteria don't cover, and two of
+my checks turned out weaker than they look.
+
+**1. The fit card is often written as if the user is the seller.** Place: the
+model's output, caused by the prompt in `tools.py::create_fit_card`.
+11 of the 45 cards say things like *"I listed it on depop"*, *"I uploaded it to
+depop"*, *"Both pieces are up now on my depop if you want to snag them"* or
+*"grab it before I change my mind and keep it for myself"*. That's the wrong
+voice: the user is **buying** this item. The pattern is about the platform,
+not about luck:
+
+| Platform of selected item | Cards in seller voice |
+|---|---|
+| depop (band tee, Y2K tee, Levi's) | 10 of 20 |
+| poshmark / thredUp | 1 of 25 |
+
+Mechanism: the prompt passes `Platform: depop` as a bare label and says
+"thrift find", but never says the user bought the item there. Depop is known
+as an app where individuals post their own clothes to sell, so the model often
+fills the gap with "I'm selling this." Criterion 4 still passes because it only
+checks that the platform name *appears*, not what the sentence around it says.
+The tool works; the prompt leaves out who is buying.
+
+**2. Criterion 1 is easy to pass with this data.** All 5 tries used
+one query, and `search_listings` counts a listing as a match if it shares any
+single keyword. Common words like "vintage" are in many titles, so most queries
+find something. "vintage jacket under $25" picked a *polo shirt*, and "vintage tee
+under $15" picked a *leather belt*, because each shared only the word
+"vintage" with the query.
+The loop completes, but what it completes with isn't always what was asked
+for. This is in the tool (`search_listings` scoring), not the loop.
+
+**3. My criterion 3 evidence can't fail as written.** In `run_agent`,
+`item = session["selected_item"]`, and the trace note compares `item["id"]` with
+`session["selected_item"]["id"]`, which is the same object. It does show both
+tools read from the session rather than a stale variable. A stronger check
+would compare against `search_results[0]["id"]`, which also matched on every
+try (lst_002 was the first result each time).
 
 
 ---
@@ -317,22 +383,56 @@ that produced it:
      the same length, your branch isn't working — and this is the fastest way
      anyone will ever find that out. -->
 
-**Happy path**
+Both traces are from `results/run_2026-10-19_1743_before.md`, printed by the
+`trace.step()` calls in `agent.py::run_agent`. Step 2 is the MCP call.
+
+**Happy path** — `vintage graphic tee under $30` (5 steps)
 
 ```
-
+[1] parse_query
+      in:  vintage graphic tee under $30
+      out: dict with keys: description, size, max_price
+[2] search_listings (via MCP)
+      in:  dict with keys: description, size, max_price
+      out: 10 items: Vintage Band Tee — Faded Grey, Graphic Tee — 2003 Tour Bootleg Style, Y2K Baby Tee — Butterfly Print … +7 more
+      →    ceiling 30.0 · highest price returned $26.0
+[3] select_item
+      out: Vintage Band Tee — Faded Grey ($19.0, depop)
+[4] suggest_outfit
+      in:  Vintage Band Tee — Faded Grey ($19.0, depop)
+      out: Outfit one: Vintage Band Tee layered under the Black cropped zip hoodie, paired with the Baggy straight-leg je…
+      →    received id lst_033 · selected_item id lst_033
+[5] create_fit_card
+      in:  Vintage Band Tee — Faded Grey ($19.0, depop)
+      out: Scored this faded grey vintage band tee for just $19 and I am already obsessed with how versatile it is. I lis…
+      →    received id lst_033 · selected_item id lst_033
 ```
 
-**Empty search**
+**Empty search** — `designer ballgown size XXS under $5` (3 steps, stops at the branch)
 
 ```
-
+[1] parse_query
+      in:  designer ballgown size XXS under $5
+      out: dict with keys: description, size, max_price
+[2] search_listings (via MCP)
+      in:  dict with keys: description, size, max_price
+      out: [] (empty)
+      →    ceiling 5.0 · highest price returned none (empty)
+[3] branch
+      →    search empty -> stopping, outfit and fit card skipped
 ```
 
-**On the MCP move:** <!-- what changed in your code, and whether anything
-behaved differently afterwards. If the rewire didn't work, say exactly where it
-broke — the error text and the last thing that worked. That earns the point in
-full. -->
+**On the MCP move:** I registered `search_listings` in `mcp_server.py` with
+`@mcp.tool()`, using typed inputs (`description: str`, `size: str | None`,
+`max_price: float | None`). In `agent.py::run_agent`, I replaced the direct
+`search_listings(...)` call with
+`call_tool("search_listings", {"description": ..., "size": ..., "max_price": ...})`
+from `mcp_client.py`. The direct call is left commented out above it. The output
+did not change. `'vintage graphic tee under $30, size M'` still selects the
+Y2K Baby Tee (lst_002) as in the Sample Run, and the impossible query still
+comes back as `[]`, so the branch fires exactly as before. `call_tool` turns
+the MCP response back into a Python list of dicts. The only visible difference is
+speed: each search now starts a new server process, so it's slower.
 
 
 
